@@ -1,0 +1,75 @@
+Option Explicit
+
+' Contrôles à conserver/créer : txtNumeroDossier, txtPersoID, txtDateTime,
+' cboProduit, cboActivite, txtCommentaire, ListBox1, btnValider, btnSupprimer, btnEnregistrer, btnDashboard, btnFermer, Label1.
+Private Sub UserForm_Initialize()
+    Me.txtPersoID.Value = Environ$("USERNAME"): Me.txtPersoID.Locked = True
+    Me.txtDateTime.Value = Format$(Now, "dd/mm/yyyy hh:nn:ss"): Me.txtDateTime.Locked = True
+    Me.cboProduit.Style = fmStyleDropDownList
+    Me.cboActivite.Style = fmStyleDropDownList
+    ChargerListeProduits Me.cboProduit
+    If Me.cboProduit.ListCount > 0 Then Me.cboProduit.ListIndex = 0
+    ChargerAttenteNV
+End Sub
+
+Private Sub cboProduit_Change()
+    ChargerListeActivites Me.cboActivite, CStr(Me.cboProduit.Value)
+    If Me.cboActivite.ListCount > 0 Then Me.cboActivite.ListIndex = 0
+End Sub
+
+Private Function SaisieValideNV() As Boolean
+    If Len(Trim$(Me.txtNumeroDossier.Value)) = 0 Then
+        MsgBox "Saisissez le numéro de dossier.", vbExclamation: Me.txtNumeroDossier.SetFocus: Exit Function
+    End If
+    If Me.cboProduit.ListIndex < 0 Then
+        MsgBox "Sélectionnez un produit.", vbExclamation: Me.cboProduit.SetFocus: Exit Function
+    End If
+    If Me.cboActivite.ListIndex < 0 Then
+        MsgBox "Sélectionnez une activité.", vbExclamation: Me.cboActivite.SetFocus: Exit Function
+    End If
+    If Len(Trim$(Me.txtCommentaire.Value)) = 0 Then
+        MsgBox "Saisissez un commentaire.", vbExclamation: Me.txtCommentaire.SetFocus: Exit Function
+    End If
+    If Not ProduitActiviteValides(CStr(Me.cboProduit.Value), CStr(Me.cboActivite.Value)) Then
+        MsgBox "Cette activité n'est pas associée au produit sélectionné.", vbExclamation: Exit Function
+    End If
+    SaisieValideNV = True
+End Function
+
+Private Sub btnValider_Click()
+    Dim ws As Worksheet, r As Long, dt As Date
+    If Not SaisieValideNV() Then Exit Sub
+    Set ws = ThisWorkbook.Worksheets("DATA_Temp")
+    r = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row + 1: dt = Now
+    ' Schéma DATA_Temp : IDTemp, NumeroDossier, Agent, DateHeureSaisie, Produit, Activite, Etat, Commentaire
+    ws.Cells(r, 1).Value = Format$(dt, "yyyymmddhhnnss") & "-" & CStr(r)
+    ws.Cells(r, 2).Value = Trim$(Me.txtNumeroDossier.Value)
+    ws.Cells(r, 3).Value = Me.txtPersoID.Value
+    ws.Cells(r, 4).Value = dt
+    ws.Cells(r, 5).Value = Me.cboProduit.Value
+    ws.Cells(r, 6).Value = Me.cboActivite.Value
+    ws.Cells(r, 7).Value = "A_ENREGISTRER"
+    ws.Cells(r, 8).Value = Trim$(Me.txtCommentaire.Value)
+    Me.txtDateTime.Value = Format$(dt, "dd/mm/yyyy hh:nn:ss")
+    Me.txtNumeroDossier.Value = vbNullString
+    Me.txtCommentaire.Value = vbNullString
+    ChargerAttenteNV
+    Me.Label1.Caption = "Ajouté à la liste d'attente. Le CSV n'est pas encore modifié."
+End Sub
+
+Private Sub ChargerAttenteNV()
+    Dim ws As Worksheet, i As Long, lastRow As Long, j As Long
+    Set ws = ThisWorkbook.Worksheets("DATA_Temp"): Me.ListBox1.Clear
+    Me.ListBox1.ColumnCount = 6
+    Me.ListBox1.AddItem "Dossier": Me.ListBox1.List(0, 1) = "Date/heure": Me.ListBox1.List(0, 2) = "Agent"
+    Me.ListBox1.List(0, 3) = "Produit": Me.ListBox1.List(0, 4) = "Activité": Me.ListBox1.List(0, 5) = "Commentaire"
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    For i = 2 To lastRow
+        If CStr(ws.Cells(i, 7).Value) = "A_ENREGISTRER" And UCase$(CStr(ws.Cells(i, 3).Value)) = UCase$(Environ$("USERNAME")) Then
+            Me.ListBox1.AddItem CStr(ws.Cells(i, 2).Value): j = Me.ListBox1.ListCount - 1
+            Me.ListBox1.List(j, 1) = Format$(ws.Cells(i, 4).Value, "dd/mm/yyyy hh:nn:ss")
+            Me.ListBox1.List(j, 2) = CStr(ws.Cells(i, 3).Value): Me.ListBox1.List(j, 3) = CStr(ws.Cells(i, 5).Value)
+            Me.ListBox1.List(j, 4) = CStr(ws.Cells(i, 6).Value): Me.ListBox1.List(j, 5) = CStr(ws.Cells(i, 8).Value)
+        End If
+    Next i
+End Sub
