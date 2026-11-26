@@ -1,0 +1,941 @@
+Option Explicit
+
+Private mSelectedID As Long
+Private mLoading As Boolean
+Private mAllowClose As Boolean
+Private mInitStep As String
+Private mInitFailed As Boolean
+Private mInitDiagnostic As String
+
+Private Const SH_TEMP As String = "DATA_Temp"
+Private Const SH_HIST As String = "Historique"
+Private Const SH_CFG As String = "Configuration"
+
+Private Sub UserForm_Initialize()
+    Dim initErr As Long, initDesc As String
+    On Error GoTo InitEchec
+    mInitStep = "configuration visuelle"
+    ConfigurerInterface
+    mInitStep = "chargement du logo"
+    ChargerLogo
+    mInitStep = "identifiant et horodatage"
+    Me.Controls("txtPersoID").Value = Environ$("USERNAME")
+    Me.Controls("txtDateHeure").Value = Format$(Now, "dd/mm/yyyy hh:nn:ss")
+    ThisWorkbook.Worksheets("Dashboard").Range("B2").Value = Environ$("USERNAME")
+    mLoading = True
+    mInitStep = "chargement des activites"
+    ChargerTaches
+    mLoading = False
+    mInitStep = "mise a jour du recapitulatif"
+    TaskChanged
+    mLoading = True
+    ChargerRecap
+    mLoading = False
+    mInitStep = "initialisation terminee"
+    Exit Sub
+InitEchec:
+    initErr = Err.Number
+    initDesc = Err.Description
+    mInitFailed = True
+    mLoading = False
+    mInitDiagnostic = "Etape : " & mInitStep & vbCrLf & _
+                      "Erreur " & initErr & " : " & initDesc
+End Sub
+
+Public Property Get InitialisationOK() As Boolean
+    InitialisationOK = Not mInitFailed
+End Property
+
+Public Property Get DiagnosticInitialisation() As String
+    DiagnosticInitialisation = mInitDiagnostic
+End Property
+
+Public Sub AutoriserFermetureInstallation()
+    mAllowClose = True
+End Sub
+
+
+Private Sub ConfigurerInterface()
+    Me.Caption = "Monabanq | Saisie quotidienne"
+    Me.BackColor = RGB(244, 248, 245)
+    Me.Width = 1160
+    Me.Height = 620
+
+    Me.Controls("fraSaisie").Visible = False
+    Me.Controls("fraRecap").Visible = False
+    With Me.Controls("imgLogo")
+        .Left = 18: .Top = 10: .Width = 140: .Height = 52
+        .PictureSizeMode = fmPictureSizeModeZoom
+        .BorderStyle = fmBorderStyleNone
+        .Visible = True
+    End With
+
+    ConfigurerLabel "lblTitre", "SAISIE QUOTIDIENNE", 180, 17, 930, 31, True
+    With Me.Controls("lblTitre")
+        .Font.Size = 17: .ForeColor = RGB(10, 39, 43)
+        .BackStyle = fmBackStyleTransparent
+    End With
+    ConfigurerLabel "lblSousTitre", "TRAITEMENT DES DOSSIERS", 182, 49, 900, 22, True
+    Me.Controls("lblSousTitre").ForeColor = RGB(76, 123, 82)
+
+    ConfigurerLabel "lblPersoID", "IDENTIFIANT AGENT", 28, 96, 185, 20, True
+    ConfigurerText "txtPersoID", 28, 117, 185, 28, True, False
+    ConfigurerLabel "lblDateHeure", "DATE / HEURE", 226, 96, 220, 20, True
+    ConfigurerText "txtDateHeure", 226, 117, 220, 28, True, False
+
+    ConfigurerLabel "lblDossier", "NUMERO DE DOSSIER", 30, 178, 410, 20, True
+    ConfigurerText "txtDossier", 30, 200, 410, 30, False, False
+    ConfigurerLabel "lblTache", "ACTIVITE", 30, 244, 410, 20, True
+    ConfigurerCombo "cboTache", 30, 266, 410, 30
+    ConfigurerLabel "lblTypologie", "TYPOLOGIE", 30, 310, 410, 20, True
+    ConfigurerCombo "cboTypologie", 30, 332, 410, 30
+    ConfigurerLabel "lblAction", "ACTION", 30, 376, 410, 20, True
+    ConfigurerCombo "cboAction", 30, 398, 410, 30
+    ConfigurerLabel "lblCommentaire", "COMMENTAIRE OBLIGATOIRE", 30, 435, 410, 20, True
+    ConfigurerText "txtCommentaire", 30, 457, 410, 86, False, True
+    ConfigurerLabel "lblAide", "SAISIE D'UNE REALISATION", 28, 150, 448, 24, True
+    With Me.Controls("lblAide")
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(10, 39, 43)
+        .ForeColor = RGB(255, 255, 255): .TextAlign = fmTextAlignLeft
+    End With
+
+    ConfigurerLabel "lblResume", "RECAPITULATIF DES SAISIES DU JOUR", 500, 91, 610, 22, True
+    With Me.Controls("lblResume")
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(10, 39, 43)
+        .ForeColor = RGB(255, 255, 255): .TextAlign = fmTextAlignLeft
+    End With
+    ConfigurerEntete "lblH_Dossier", "DOSSIER", 500, 119, 66, 22
+    ConfigurerEntete "lblH_Date", "DATE", 566, 119, 78, 22
+    ConfigurerEntete "lblH_Tache", "ACTIVITE", 644, 119, 78, 22
+    ConfigurerEntete "lblH_Typo", "TYPOLOGIE", 722, 119, 83, 22
+    ConfigurerEntete "lblH_Action", "ACTION", 805, 119, 65, 22
+    ConfigurerEntete "lblH_Etat", "ETAT", 870, 119, 60, 22
+    ConfigurerEntete "lblH_Comment", "COMMENTAIRE", 930, 119, 180, 22
+    With Me.Controls("lstRecap")
+        .Left = 500: .Top = 141: .Width = 610: .Height = 240
+        .ColumnCount = 9
+        .ColumnWidths = "0 pt;66 pt;78 pt;78 pt;83 pt;65 pt;60 pt;180 pt;0 pt"
+        .BoundColumn = 1
+        .IntegralHeight = False
+        .MultiSelect = fmMultiSelectSingle
+        .Font.Name = "Arial": .Font.Size = 8
+        .BackColor = RGB(255, 255, 255): .ForeColor = RGB(35, 49, 43)
+    End With
+
+    ConfigurerCarte "lblCarteAjouteesTitre", "lblCarteAjouteesValeur", "AJOUTEES", 500, 393, 128, RGB(234, 248, 234), RGB(10, 39, 43)
+    ConfigurerCarte "lblCarteEnregistreesTitre", "lblCarteEnregistreesValeur", "ENREGISTREES", 636, 393, 128, RGB(231, 243, 237), RGB(36, 116, 78)
+    ConfigurerCarte "lblCarteSupprimeesTitre", "lblCarteSupprimeesValeur", "SUPPRIMEES", 772, 393, 128, RGB(251, 235, 237), RGB(179, 39, 55)
+    ConfigurerCarte "lblCarteAttenteTitre", "lblCarteAttenteValeur", "A ENREGISTRER", 908, 393, 128, RGB(255, 245, 222), RGB(142, 99, 21)
+    ConfigurerGraphique
+
+    ConfigurerBouton "cmdAjouter", "Ajouter", 18, 570, 160, 40, RGB(10, 39, 43)
+    ConfigurerBouton "cmdModifier", "Modifier", 190, 570, 160, 40, RGB(83, 101, 121)
+    ConfigurerBouton "cmdSupprimer", "Supprimer", 362, 570, 160, 40, RGB(190, 35, 55)
+    ConfigurerBouton "cmdEnregistrer", "Enregistrer", 534, 570, 160, 40, RGB(76, 123, 82)
+    ConfigurerBouton "cmdDashboard", "Dashboard", 706, 570, 160, 40, RGB(10, 39, 43)
+    ConfigurerBouton "cmdFermer", "Fermer", 878, 570, 160, 40, RGB(83, 101, 121)
+End Sub
+
+
+Private Sub ChargerLogo()
+    Dim cheminLogo As String
+    cheminLogo = ThisWorkbook.Path & Application.PathSeparator & "Monabanq_logo.jpg"
+    If Len(Dir$(cheminLogo)) = 0 Then
+        Me.Controls("imgLogo").Visible = False
+        Exit Sub
+    End If
+    On Error Resume Next
+    Me.Controls("imgLogo").Picture = LoadPicture(cheminLogo)
+    Me.Controls("imgLogo").Visible = True
+    On Error GoTo 0
+End Sub
+
+Private Sub ConfigurerLabel(ByVal nm As String, ByVal titre As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal h As Single, ByVal gras As Boolean)
+    With Me.Controls(nm)
+        .Caption = titre
+        .Left = x: .Top = y: .Width = w: .Height = h
+        .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = gras
+        .ForeColor = RGB(35, 49, 43)
+        .BackStyle = fmBackStyleTransparent
+    End With
+End Sub
+
+Private Sub ConfigurerText(ByVal nm As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal h As Single, ByVal verrouille As Boolean, ByVal multiligne As Boolean)
+    With Me.Controls(nm)
+        .Left = x: .Top = y: .Width = w: .Height = h
+        .Font.Name = "Arial": .Font.Size = 9
+        .Locked = verrouille
+        .BackColor = IIf(verrouille, RGB(241, 246, 242), RGB(255, 255, 255))
+        .ForeColor = RGB(35, 49, 43)
+        .MultiLine = multiligne
+        .EnterKeyBehavior = multiligne
+        .ScrollBars = IIf(multiligne, fmScrollBarsVertical, fmScrollBarsNone)
+    End With
+End Sub
+
+Private Sub ConfigurerCombo(ByVal nm As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal h As Single)
+    With Me.Controls(nm)
+        .Left = x: .Top = y: .Width = w: .Height = h
+        .Font.Name = "Arial": .Font.Size = 9
+        .Style = fmStyleDropDownList
+    End With
+End Sub
+
+Private Sub ConfigurerBouton(ByVal nm As String, ByVal titre As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal h As Single, ByVal couleur As Long)
+    With Me.Controls(nm)
+        .Caption = titre
+        .Left = x: .Top = y: .Width = w: .Height = h
+        .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = True
+        .ForeColor = RGB(255, 255, 255): .BackColor = couleur
+        .TakeFocusOnClick = False
+    End With
+End Sub
+
+Private Sub ConfigurerCarte(ByVal nmTitre As String, ByVal nmValeur As String, ByVal titre As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal fond As Long, ByVal accent As Long)
+    With Me.Controls(nmTitre)
+        .Caption = titre
+        .Left = x: .Top = y: .Width = w: .Height = 18
+        .BackStyle = fmBackStyleOpaque: .BackColor = fond: .ForeColor = accent
+        .Font.Name = "Arial": .Font.Size = 8: .Font.Bold = True
+        .TextAlign = fmTextAlignCenter
+    End With
+    With Me.Controls(nmValeur)
+        .Caption = "0"
+        .Left = x: .Top = y + 18: .Width = w: .Height = 25
+        .BackStyle = fmBackStyleOpaque: .BackColor = fond: .ForeColor = accent
+        .Font.Name = "Arial": .Font.Size = 14: .Font.Bold = True
+        .TextAlign = fmTextAlignCenter
+    End With
+End Sub
+
+
+Private Sub ConfigurerGraphique()
+    ConfigurerLabel "lblGraphTitre", "DOSSIERS DU JOUR PAR ACTIVITE", 500, 460, 610, 20, True
+    Me.Controls("lblGraphTitre").ForeColor = RGB(10, 39, 43)
+    ConfigurerLabel "lblGraphTask1", "", 500, 487, 112, 20, True
+    ConfigurerLabel "lblGraphTask2", "", 500, 514, 112, 20, True
+    ConfigurerLabel "lblGraphTask3", "", 500, 541, 112, 20, True
+    With Me.Controls("lblGraphTrack1")
+        .Caption = "": .Left = 620: .Top = 490: .Width = 360: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(235, 243, 236)
+        .BorderStyle = fmBorderStyleNone
+    End With
+    With Me.Controls("lblGraphTrack2")
+        .Caption = "": .Left = 620: .Top = 517: .Width = 360: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(235, 243, 236)
+        .BorderStyle = fmBorderStyleNone
+    End With
+    With Me.Controls("lblGraphTrack3")
+        .Caption = "": .Left = 620: .Top = 544: .Width = 360: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(235, 243, 236)
+        .BorderStyle = fmBorderStyleNone
+    End With
+    With Me.Controls("lblGraphBar1")
+        .Caption = "": .Left = 620: .Top = 490: .Width = 1: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(10, 39, 43)
+        .BorderStyle = fmBorderStyleNone: .Visible = False: .ZOrder 0
+    End With
+    With Me.Controls("lblGraphBar2")
+        .Caption = "": .Left = 620: .Top = 517: .Width = 1: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(76, 123, 82)
+        .BorderStyle = fmBorderStyleNone: .Visible = False: .ZOrder 0
+    End With
+    With Me.Controls("lblGraphBar3")
+        .Caption = "": .Left = 620: .Top = 544: .Width = 1: .Height = 14
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(180, 220, 185)
+        .BorderStyle = fmBorderStyleNone: .Visible = False: .ZOrder 0
+    End With
+    With Me.Controls("lblGraphValue1")
+        .Caption = "0": .Left = 986: .Top = 487: .Width = 60: .Height = 20
+        .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = True
+        .ForeColor = RGB(10, 39, 43): .TextAlign = fmTextAlignRight
+        .BackStyle = fmBackStyleTransparent
+    End With
+    With Me.Controls("lblGraphValue2")
+        .Caption = "0": .Left = 986: .Top = 514: .Width = 60: .Height = 20
+        .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = True
+        .ForeColor = RGB(76, 123, 82): .TextAlign = fmTextAlignRight
+        .BackStyle = fmBackStyleTransparent
+    End With
+    With Me.Controls("lblGraphValue3")
+        .Caption = "0": .Left = 986: .Top = 541: .Width = 60: .Height = 20
+        .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = True
+        .ForeColor = RGB(76, 123, 82): .TextAlign = fmTextAlignRight
+        .BackStyle = fmBackStyleTransparent
+    End With
+End Sub
+
+
+Private Sub ChargerGraphique()
+    Dim cfg As Worksheet, wt As Worksheet, r As Long, last As Long
+    Dim activites(1 To 3) As String, compteurs(1 To 3) As Long
+    Dim i As Long, valeur As String, etat As String, largeur As Single, maximum As Long
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    For i = 1 To 3
+        activites(i) = Trim$(CStr(cfg.Cells(i + 1, 8).Value))
+        If activites(i) = "" Then activites(i) = "Activite " & CStr(i)
+    Next i
+    last = wt.Cells(wt.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If Len(wt.Cells(r, 1).Value) > 0 And IsDate(wt.Cells(r, 4).Value) Then
+            If DateValue(CDate(wt.Cells(r, 4).Value)) = Date Then
+                etat = CStr(wt.Cells(r, 9).Value)
+                If etat <> EtatSupprimee() Then
+                    valeur = Trim$(CStr(wt.Cells(r, 5).Value))
+                    For i = 1 To 3
+                        If StrComp(valeur, activites(i), vbTextCompare) = 0 Then compteurs(i) = compteurs(i) + 1
+                    Next i
+                End If
+            End If
+        End If
+    Next r
+    Me.Controls("lblGraphTask1").Caption = activites(1)
+    Me.Controls("lblGraphTask2").Caption = activites(2)
+    Me.Controls("lblGraphTask3").Caption = activites(3)
+    Me.Controls("lblGraphValue1").Caption = CStr(compteurs(1))
+    Me.Controls("lblGraphValue2").Caption = CStr(compteurs(2))
+    Me.Controls("lblGraphValue3").Caption = CStr(compteurs(3))
+    maximum = Application.Max(compteurs(1), compteurs(2), compteurs(3))
+    For i = 1 To 3
+        largeur = 1
+        If maximum > 0 Then largeur = Application.Max(1, 360 * compteurs(i) / maximum)
+        With Me.Controls("lblGraphBar" & CStr(i))
+            .Width = largeur
+            .Visible = (compteurs(i) > 0)
+            .ZOrder 0
+        End With
+    Next i
+End Sub
+
+Private Sub ConfigurerEntete(ByVal nm As String, ByVal titre As String, ByVal x As Single, ByVal y As Single, ByVal w As Single, ByVal h As Single)
+    With Me.Controls(nm)
+        .Caption = titre
+        .Left = x: .Top = y: .Width = w: .Height = h
+        .BackStyle = fmBackStyleOpaque: .BackColor = RGB(10, 39, 43)
+        .ForeColor = RGB(255, 255, 255): .Font.Name = "Arial": .Font.Size = 9: .Font.Bold = True
+        .TextAlign = fmTextAlignCenter
+    End With
+End Sub
+
+Private Sub cmdAjouter_Click()
+    Ajouter
+End Sub
+
+Private Sub cmdModifier_Click()
+    Modifier
+End Sub
+
+Private Sub cmdSupprimer_Click()
+    Supprimer
+End Sub
+
+Private Sub cmdEnregistrer_Click()
+    Enregistrer
+End Sub
+
+Private Sub cmdDashboard_Click()
+    Dashboard
+End Sub
+
+Private Sub cmdFermer_Click()
+    Fermer
+End Sub
+
+Private Sub cboTache_Change()
+    If Not mLoading Then TaskChanged
+End Sub
+
+Private Sub lstRecap_Click()
+    If Not mLoading Then SelectionChanged
+End Sub
+
+
+Private Sub ChargerTaches()
+    Dim cfg As Worksheet, c As MSForms.ComboBox, r As Long, v As String
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    Set c = Me.Controls("cboTache")
+    c.Clear
+    For r = 2 To 4
+        v = Trim$(CStr(cfg.Cells(r, 8).Value))
+        If v <> "" Then c.AddItem v
+    Next r
+    c.ListIndex = -1
+End Sub
+
+
+Private Sub TaskChanged()
+    Dim cfg As Worksheet, task As String, previous As String, col As Long, r As Long, activityRow As Long
+    Dim c As MSForms.ComboBox, v As String
+    If mLoading Then Exit Sub
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    Set c = Me.Controls("cboTypologie")
+    previous = CStr(c.Value)
+    c.Clear
+    task = Trim$(CStr(Me.Controls("cboTache").Value))
+    For activityRow = 2 To 4
+        If StrComp(task, Trim$(CStr(cfg.Cells(activityRow, 8).Value)), vbTextCompare) = 0 Then
+            col = activityRow + 7
+            Exit For
+        End If
+    Next activityRow
+    If col > 0 Then
+        For r = 2 To 19
+            v = Trim$(CStr(cfg.Cells(r, col).Value))
+            If v <> "" Then c.AddItem v
+        Next r
+    End If
+    c.ListIndex = -1
+    For r = 0 To c.ListCount - 1
+        If StrComp(CStr(c.List(r)), previous, vbTextCompare) = 0 Then
+            c.ListIndex = r
+            Exit For
+        End If
+    Next r
+    ActualiserActions
+End Sub
+
+Private Sub ActualiserActions()
+    Dim cfg As Worksheet, c As MSForms.ComboBox, activity As String
+    Dim previous As String, r As Long, v As String, actionActive As Boolean
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    Set c = Me.Controls("cboAction")
+    activity = Trim$(CStr(Me.Controls("cboTache").Value))
+    previous = CStr(c.Value)
+    actionActive = (StrComp(activity, Trim$(CStr(cfg.Range("H2").Value)), vbTextCompare) = 0 _
+                 Or StrComp(activity, Trim$(CStr(cfg.Range("H3").Value)), vbTextCompare) = 0)
+    c.Clear
+    If actionActive Then
+        For r = 2 To 6
+            v = Trim$(CStr(cfg.Cells(r, 12).Value))
+            If v <> "" Then c.AddItem v
+        Next r
+    End If
+    c.Enabled = actionActive
+    c.BackColor = IIf(actionActive, RGB(255, 255, 255), RGB(241, 246, 242))
+    c.ForeColor = RGB(35, 49, 43)
+    Me.Controls("lblAction").ForeColor = IIf(actionActive, RGB(35, 49, 43), RGB(140, 150, 145))
+    c.ListIndex = -1
+    If actionActive Then
+        For r = 0 To c.ListCount - 1
+            If StrComp(CStr(c.List(r)), previous, vbTextCompare) = 0 Then
+                c.ListIndex = r
+                Exit For
+            End If
+        Next r
+    End If
+End Sub
+
+
+Private Sub ChargerRecap()
+    Dim wt As Worksheet, r As Long, last As Long, id As Long, etat As String, dateVal As Date
+    Dim lb As MSForms.ListBox, addedToday As Long, deletedToday As Long, savedToday As Long, pendingAll As Long
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    Set lb = Me.Controls("lstRecap")
+    lb.Clear
+    last = wt.Cells(wt.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If IsNumeric(wt.Cells(r, 1).Value) And IsDate(wt.Cells(r, 4).Value) Then
+            id = CLng(wt.Cells(r, 1).Value)
+            etat = CStr(wt.Cells(r, 9).Value)
+            dateVal = CDate(wt.Cells(r, 4).Value)
+            If etat <> EtatSupprimee() And (DateValue(dateVal) = Date Or etat = EtatAjoutee()) Then
+                lb.AddItem CStr(id)
+                lb.List(lb.ListCount - 1, 1) = CStr(wt.Cells(r, 3).Value)
+                lb.List(lb.ListCount - 1, 2) = Format$(dateVal, "dd/mm/yyyy hh:nn")
+                lb.List(lb.ListCount - 1, 3) = CStr(wt.Cells(r, 5).Value)
+                lb.List(lb.ListCount - 1, 4) = CStr(wt.Cells(r, 6).Value)
+                lb.List(lb.ListCount - 1, 5) = CStr(wt.Cells(r, 7).Value)
+                lb.List(lb.ListCount - 1, 6) = etat
+                lb.List(lb.ListCount - 1, 7) = CStr(wt.Cells(r, 8).Value)
+                lb.List(lb.ListCount - 1, 8) = CStr(wt.Cells(r, 2).Value)
+            End If
+            If DateValue(dateVal) = Date Then
+                If etat = EtatAjoutee() Then addedToday = addedToday + 1
+                If etat = EtatSupprimee() Then deletedToday = deletedToday + 1
+                If etat = EtatEnregistree() Then savedToday = savedToday + 1
+            End If
+            If etat = EtatAjoutee() Then pendingAll = pendingAll + 1
+        End If
+    Next r
+    Me.Controls("lblResume").Caption = "REALISATIONS DU " & UCase$(Format$(Date, "dd mmmm yyyy"))
+    Me.Controls("lblCarteAjouteesValeur").Caption = CStr(addedToday)
+    Me.Controls("lblCarteEnregistreesValeur").Caption = CStr(savedToday)
+    Me.Controls("lblCarteSupprimeesValeur").Caption = CStr(deletedToday)
+    Me.Controls("lblCarteAttenteValeur").Caption = CStr(pendingAll)
+    ChargerGraphique
+End Sub
+
+
+Public Sub SelectionChanged()
+    Dim lb As MSForms.ListBox, id As Long, r As Long, wt As Worksheet
+    If mLoading Then Exit Sub
+    Set lb = Me.Controls("lstRecap")
+    If lb.ListIndex < 0 Then Exit Sub
+    id = CLng(lb.List(lb.ListIndex, 0))
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    r = TrouverID(wt, id)
+    If r = 0 Then Exit Sub
+    mSelectedID = id
+    Me.Controls("txtDossier").Value = CStr(wt.Cells(r, 3).Value)
+    Me.Controls("txtDateHeure").Value = Format$(CDate(wt.Cells(r, 4).Value), "dd/mm/yyyy hh:nn:ss")
+    Me.Controls("cboTache").Value = CStr(wt.Cells(r, 5).Value)
+    TaskChanged
+    Me.Controls("cboTypologie").Value = CStr(wt.Cells(r, 6).Value)
+    Me.Controls("cboAction").Value = CStr(wt.Cells(r, 7).Value)
+    Me.Controls("txtCommentaire").Value = CStr(wt.Cells(r, 8).Value)
+End Sub
+
+
+Public Sub Ajouter()
+    Dim agent As String, dossier As String, task As String, typ As String, act As String, comment As String
+    Dim stamp As Date, wt As Worksheet, r As Long, id As Long
+    agent = Environ$("USERNAME")
+    dossier = Trim$(CStr(Me.Controls("txtDossier").Value))
+    task = Trim$(CStr(Me.Controls("cboTache").Value))
+    typ = Trim$(CStr(Me.Controls("cboTypologie").Value))
+    act = Trim$(CStr(Me.Controls("cboAction").Value))
+    comment = CStr(Me.Controls("txtCommentaire").Value)
+    If dossier = "" Or task = "" Or typ = "" Or Trim$(comment) = "" Then
+        MsgBox "Renseignez le numero de dossier, l'activite, la typologie et le commentaire obligatoire.", vbExclamation, "Saisie incomplete"
+        Exit Sub
+    End If
+    If Not TypologieValide(task, typ) Then
+        MsgBox "Cette typologie ne correspond pas a l'activite selectionnee.", vbExclamation, "Typologie invalide"
+        Exit Sub
+    End If
+    If Not ActionValide(task, act) Then
+        MsgBox "Choisissez une action pour cette activite.", vbExclamation, "Action invalide"
+        Exit Sub
+    End If
+    stamp = Now
+    If Doublon(agent, dossier, stamp, task, typ, act, comment, 0) Then
+        MsgBox "Cette ligne existe deja pour cet agent aujourd'hui (action et commentaire compris).", vbExclamation, "Doublon"
+        Exit Sub
+    End If
+    If MsgBox("Confirmer l'ajout de cette ligne ?", vbYesNo + vbQuestion, "Ajouter une ligne") <> vbYes Then Exit Sub
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    id = ProchainID(wt)
+    r = ProchaineLigne(wt, 1)
+    wt.Cells(r, 1).Resize(1, 9).Value = Array(id, agent, dossier, stamp, task, typ, act, comment, EtatAjoutee())
+    wt.Cells(r, 4).NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    ThisWorkbook.Save
+    ViderChamps
+    ChargerRecap
+    MsgBox "La ligne " & id & " est ajoutee et gardee dans la file d'attente.", vbInformation, "Monabanq"
+End Sub
+
+
+Public Sub Modifier()
+    Dim wt As Worksheet, r As Long, dossier As String, task As String, typ As String, act As String, comment As String
+    If mSelectedID = 0 Then
+        MsgBox "Selectionnez d'abord une ligne dans le recapitulatif.", vbExclamation, "Aucune ligne selectionnee"
+        Exit Sub
+    End If
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    r = TrouverID(wt, mSelectedID)
+    If r = 0 Then
+        MsgBox "La ligne selectionnee est introuvable.", vbExclamation, "Modification impossible"
+        Exit Sub
+    End If
+    If CStr(wt.Cells(r, 9).Value) <> EtatAjoutee() Then
+        MsgBox "Seules les lignes Ajoutees non enregistrees peuvent etre modifiees.", vbExclamation, "Modification impossible"
+        Exit Sub
+    End If
+    dossier = Trim$(CStr(Me.Controls("txtDossier").Value))
+    task = Trim$(CStr(Me.Controls("cboTache").Value))
+    typ = Trim$(CStr(Me.Controls("cboTypologie").Value))
+    act = Trim$(CStr(Me.Controls("cboAction").Value))
+    comment = CStr(Me.Controls("txtCommentaire").Value)
+    If dossier = "" Or task = "" Or typ = "" Or Trim$(comment) = "" _
+       Or Not TypologieValide(task, typ) Or Not ActionValide(task, act) Then
+        MsgBox "Verifiez le dossier, l'activite, la typologie, l'action et le commentaire obligatoire.", vbExclamation, "Saisie invalide"
+        Exit Sub
+    End If
+    If Doublon(CStr(wt.Cells(r, 2).Value), dossier, CDate(wt.Cells(r, 4).Value), task, typ, act, comment, mSelectedID) Then
+        MsgBox "Cette modification creerait un doublon (action et commentaire compris).", vbExclamation, "Doublon"
+        Exit Sub
+    End If
+    If MsgBox("Confirmer la modification de la ligne " & mSelectedID & " ?", vbYesNo + vbQuestion, "Modifier une ligne") <> vbYes Then Exit Sub
+    wt.Cells(r, 3).Value = dossier
+    wt.Cells(r, 5).Value = task
+    wt.Cells(r, 6).Value = typ
+    wt.Cells(r, 7).Value = act
+    wt.Cells(r, 8).Value = comment
+    ThisWorkbook.Save
+    ChargerRecap
+    MsgBox "La ligne " & mSelectedID & " a ete modifiee.", vbInformation, "Monabanq"
+End Sub
+
+Public Sub Supprimer()
+    Dim wt As Worksheet, r As Long, id As Long
+    If mSelectedID = 0 Then
+        MsgBox "Selectionnez d'abord une ligne dans le recapitulatif.", vbExclamation, "Aucune ligne selectionnee"
+        Exit Sub
+    End If
+    id = mSelectedID
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    r = TrouverID(wt, id)
+    If r = 0 Then
+        MsgBox "La ligne selectionnee est introuvable.", vbExclamation, "Suppression impossible"
+        Exit Sub
+    End If
+    If CStr(wt.Cells(r, 9).Value) <> EtatAjoutee() Then
+        MsgBox "Seules les lignes Ajoutees non enregistrees peuvent etre supprimees.", vbExclamation, "Suppression impossible"
+        Exit Sub
+    End If
+    If MsgBox("Confirmer la suppression de la ligne " & id & " ?" & vbCrLf & "Elle sera retiree du recapitulatif.", vbYesNo + vbQuestion, "Supprimer une ligne") <> vbYes Then Exit Sub
+    wt.Cells(r, 9).Value = EtatSupprimee()
+    ThisWorkbook.Save
+    mSelectedID = 0
+    ViderChamps
+    ChargerRecap
+    MsgBox "La ligne " & id & " est supprimee du recapitulatif.", vbInformation, "Monabanq"
+End Sub
+
+Public Sub Enregistrer()
+    Dim wt As Worksheet, wh As Worksheet
+    Dim r As Long, last As Long, id As Long, total As Long, savedCount As Long
+    Dim agent As String, csvPath As String, stamp As Date
+    Dim errNum As Long, errDesc As String
+
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    last = wt.Cells(wt.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If CStr(wt.Cells(r, 9).Value) = EtatAjoutee() Then total = total + 1
+    Next r
+    If total = 0 Then
+        MsgBox "Aucune ligne ajoutee n'attend d'enregistrement.", vbInformation, "Monabanq"
+        Exit Sub
+    End If
+    If MsgBox("Enregistrer les " & total & " ligne(s) ajoutee(s) dans les CSV du dossier defini en Configuration!B10 ?", _
+              vbYesNo + vbQuestion, "Confirmer l'enregistrement") <> vbYes Then Exit Sub
+
+    On Error GoTo GestionErreur
+    Set wh = ThisWorkbook.Worksheets(SH_HIST)
+    For r = 2 To last
+        If CStr(wt.Cells(r, 9).Value) = EtatAjoutee() Then
+            id = CLng(wt.Cells(r, 1).Value)
+            agent = CStr(wt.Cells(r, 2).Value)
+            stamp = CDate(wt.Cells(r, 4).Value)
+            csvPath = CheminCsv(agent, stamp)
+            AppendCSV csvPath, wt, r
+            AjouterHistorique wh, wt, r
+            wt.Cells(r, 9).Value = EtatEnregistree()
+            savedCount = savedCount + 1
+        End If
+    Next r
+
+    ThisWorkbook.Save
+    mSelectedID = 0
+    ViderChamps
+    ChargerRecap
+    MsgBox savedCount & " ligne(s) enregistree(s) dans le(s) CSV du dossier defini en Configuration!B10 et ajoutee(s) a Historique.", _
+           vbInformation, "Monabanq"
+    Exit Sub
+
+GestionErreur:
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    ThisWorkbook.Save
+    mSelectedID = 0
+    ViderChamps
+    ChargerRecap
+    On Error GoTo 0
+    MsgBox savedCount & " ligne(s) sur " & total & " enregistree(s). Echec sur la ligne " & id & ": " & _
+           errNum & " - " & errDesc & vbCrLf & _
+           "Les lignes deja enregistrees sont marquees dans DATA_Temp; les autres restent en attente.", _
+           vbCritical, "Erreur CSV"
+End Sub
+
+Public Sub Dashboard()
+    On Error GoTo GestionErreur
+    ThisWorkbook.Activate
+    With ThisWorkbook.Worksheets("Dashboard")
+        .Visible = xlSheetVisible
+        .Activate
+    End With
+    Application.Calculate
+    Exit Sub
+GestionErreur:
+    MsgBox "Impossible d'ouvrir la feuille Dashboard : " & Err.Description, vbExclamation, "Monabanq"
+End Sub
+
+Public Sub Fermer()
+    Dim nb As Long, ans As VbMsgBoxResult
+    nb = NombreEnAttente
+    If nb > 0 Then
+        ans = MsgBox(nb & " ligne(s) Ajoutee(s) ne sont pas encore dans le CSV." & vbCrLf & "Voulez-vous enregistrer le classeur pour conserver le cache et fermer le formulaire ?", vbYesNo + vbQuestion, "Fermer Monabanq")
+        If ans <> vbYes Then Exit Sub
+        ThisWorkbook.Save
+    Else
+        If MsgBox("Fermer le formulaire Monabanq ?", vbYesNo + vbQuestion, "Fermer") <> vbYes Then Exit Sub
+    End If
+    mAllowClose = True
+    Unload Me
+End Sub
+
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If Not mAllowClose Then
+        Cancel = True
+        Fermer
+    End If
+End Sub
+
+
+Private Function NombreEnAttente() As Long
+    Dim wt As Worksheet, r As Long, last As Long
+    Set wt = ThisWorkbook.Worksheets(SH_TEMP)
+    last = wt.Cells(wt.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If CStr(wt.Cells(r, 9).Value) = EtatAjoutee() Then NombreEnAttente = NombreEnAttente + 1
+    Next r
+End Function
+
+
+Private Sub ViderChamps()
+    mSelectedID = 0
+    mLoading = True
+    Me.Controls("txtDossier").Value = ""
+    Me.Controls("txtCommentaire").Value = ""
+    Me.Controls("txtDateHeure").Value = Format$(Now, "dd/mm/yyyy hh:nn:ss")
+    Me.Controls("cboTache").ListIndex = -1
+    Me.Controls("cboTypologie").Clear
+    Me.Controls("cboAction").Clear
+    mLoading = False
+    ActualiserActions
+    Me.Controls("lstRecap").ListIndex = -1
+End Sub
+
+Private Function EtatAjoutee() As String
+    EtatAjoutee = "Ajout" & ChrW(233) & "e"
+End Function
+
+Private Function EtatSupprimee() As String
+    EtatSupprimee = "Supprim" & ChrW(233) & "e"
+End Function
+
+Private Function EtatEnregistree() As String
+    EtatEnregistree = "Enregistr" & ChrW(233) & "e"
+End Function
+
+
+Private Function TypologieValide(ByVal task As String, ByVal typ As String) As Boolean
+    Dim cfg As Worksheet, col As Long, r As Long, activityRow As Long
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    For activityRow = 2 To 4
+        If StrComp(task, CStr(cfg.Cells(activityRow, 8).Value), vbTextCompare) = 0 Then
+            col = activityRow + 7
+            Exit For
+        End If
+    Next activityRow
+    If col = 0 Or Len(typ) = 0 Then Exit Function
+    For r = 2 To 19
+        If StrComp(Trim$(CStr(cfg.Cells(r, col).Value)), typ, vbTextCompare) = 0 Then
+            TypologieValide = True
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Function ActionValide(ByVal task As String, ByVal act As String) As Boolean
+    Dim cfg As Worksheet, r As Long
+    Set cfg = ThisWorkbook.Worksheets(SH_CFG)
+    If StrComp(task, CStr(cfg.Range("H4").Value), vbTextCompare) = 0 Then
+        ActionValide = (Len(act) = 0)
+        Exit Function
+    End If
+    If StrComp(task, CStr(cfg.Range("H2").Value), vbTextCompare) <> 0 _
+       And StrComp(task, CStr(cfg.Range("H3").Value), vbTextCompare) <> 0 Then Exit Function
+    If Len(act) = 0 Then Exit Function
+    For r = 2 To 6
+        If StrComp(Trim$(CStr(cfg.Cells(r, 12).Value)), act, vbTextCompare) = 0 Then
+            ActionValide = True
+            Exit Function
+        End If
+    Next r
+End Function
+
+
+Private Function Doublon(ByVal agent As String, ByVal dossier As String, ByVal jour As Date, ByVal task As String, ByVal typ As String, ByVal act As String, ByVal comment As String, ByVal ignoreID As Long) As Boolean
+    Dim sh As Worksheet, r As Long, last As Long
+    Set sh = ThisWorkbook.Worksheets(SH_TEMP)
+    last = sh.Cells(sh.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If Val(sh.Cells(r, 1).Value) <> ignoreID And Len(sh.Cells(r, 1).Value) > 0 _
+           And IsDate(sh.Cells(r, 4).Value) And CStr(sh.Cells(r, 9).Value) <> EtatSupprimee() Then
+            If CStr(sh.Cells(r, 2).Value) = agent And StrComp(CStr(sh.Cells(r, 3).Value), dossier, vbTextCompare) = 0 _
+                And DateValue(sh.Cells(r, 4).Value) = DateValue(jour) _
+                And StrComp(CStr(sh.Cells(r, 5).Value), task, vbTextCompare) = 0 _
+                And StrComp(CStr(sh.Cells(r, 6).Value), typ, vbTextCompare) = 0 _
+                And StrComp(CStr(sh.Cells(r, 7).Value), act, vbTextCompare) = 0 _
+                And StrComp(Trim$(CStr(sh.Cells(r, 8).Value)), Trim$(comment), vbTextCompare) = 0 Then
+                Doublon = True
+                Exit Function
+            End If
+        End If
+    Next r
+    Set sh = ThisWorkbook.Worksheets(SH_HIST)
+    last = sh.Cells(sh.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If Len(sh.Cells(r, 1).Value) > 0 And IsDate(sh.Cells(r, 3).Value) Then
+            If StrComp(CStr(sh.Cells(r, 1).Value), agent, vbTextCompare) = 0 _
+                And StrComp(CStr(sh.Cells(r, 2).Value), dossier, vbTextCompare) = 0 _
+                And DateValue(sh.Cells(r, 3).Value) = DateValue(jour) _
+                And StrComp(CStr(sh.Cells(r, 4).Value), task, vbTextCompare) = 0 _
+                And StrComp(CStr(sh.Cells(r, 5).Value), typ, vbTextCompare) = 0 _
+                And StrComp(CStr(sh.Cells(r, 6).Value), act, vbTextCompare) = 0 _
+                And StrComp(Trim$(CStr(sh.Cells(r, 7).Value)), Trim$(comment), vbTextCompare) = 0 Then
+                Doublon = True
+                Exit Function
+            End If
+        End If
+    Next r
+End Function
+
+Private Function ProchainID(ByVal sh As Worksheet) As Long
+    Dim last As Long, r As Long, mx As Long
+    last = sh.Cells(sh.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If IsNumeric(sh.Cells(r, 1).Value) Then mx = Application.Max(mx, CLng(sh.Cells(r, 1).Value))
+    Next r
+    ProchainID = mx + 1
+End Function
+
+Private Function ProchaineLigne(ByVal sh As Worksheet, ByVal col As Long) As Long
+    ProchaineLigne = sh.Cells(sh.Rows.Count, col).End(xlUp).Row + 1
+    If ProchaineLigne < 2 Then ProchaineLigne = 2
+End Function
+
+Private Function TrouverID(ByVal sh As Worksheet, ByVal id As Long) As Long
+    Dim r As Long, last As Long
+    last = sh.Cells(sh.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To last
+        If Val(sh.Cells(r, 1).Value) = id Then
+            TrouverID = r
+            Exit Function
+        End If
+    Next r
+End Function
+
+
+Private Sub AjouterHistorique(ByVal wh As Worksheet, ByVal wt As Worksheet, ByVal sourceRow As Long)
+    Dim r As Long
+    r = ProchaineLigne(wh, 1)
+    wh.Cells(r, 1).Resize(1, 7).Value = Array(wt.Cells(sourceRow, 2).Value, wt.Cells(sourceRow, 3).Value, wt.Cells(sourceRow, 4).Value, wt.Cells(sourceRow, 5).Value, wt.Cells(sourceRow, 6).Value, wt.Cells(sourceRow, 7).Value, wt.Cells(sourceRow, 8).Value)
+    wh.Cells(r, 3).NumberFormat = "dd/mm/yyyy hh:mm:ss"
+End Sub
+
+
+Private Function CheminCsv(ByVal agent As String, ByVal stamp As Date) As String
+    Dim base As String, root As String, folder As String, fileName As String
+    base = Trim$(CStr(ThisWorkbook.Worksheets(SH_CFG).Range("B10").Value))
+    If Len(base) = 0 Then
+        Err.Raise vbObjectError + 2120, "Monabanq", _
+            "Renseignez Configuration!B10 avec le dossier de destination des fichiers CSV."
+    End If
+    base = Replace(base, "/", Application.PathSeparator)
+    Do While Len(base) > 3 And Right$(base, 1) = Application.PathSeparator
+        base = Left$(base, Len(base) - 1)
+    Loop
+    If (Len(base) >= 3 And Mid$(base, 2, 2) = ":" & Application.PathSeparator) _
+       Or Left$(base, 2) = Application.PathSeparator & Application.PathSeparator _
+       Or Left$(base, 1) = Application.PathSeparator Then
+        root = base
+    Else
+        If Len(ThisWorkbook.Path) = 0 Then
+            Err.Raise vbObjectError + 2122, "Monabanq", _
+                "Enregistrez d'abord le classeur .xlsm pour utiliser un dossier relatif."
+        End If
+        root = ThisWorkbook.Path & Application.PathSeparator & base
+    End If
+    folder = root & Application.PathSeparator & Format$(stamp, "yyyy") & _
+             Application.PathSeparator & Format$(stamp, "mm")
+    CreerDossier folder
+    fileName = NomFichier(agent) & ".csv"
+    CheminCsv = folder & Application.PathSeparator & fileName
+End Function
+
+
+Private Sub AppendCSV(ByVal filePath As String, ByVal wt As Worksheet, ByVal r As Long)
+    Dim stm As Object, txt As String, header As String, firstLine As String
+    header = "PersoID;N" & ChrW(176) & " de dossier;Date/heure de saisie;Activit" & ChrW(233) & ";Typologie;Action;Commentaire" & vbCrLf
+    If Dir$(filePath) <> "" Then
+        Set stm = CreateObject("ADODB.Stream")
+        stm.Type = 2: stm.Charset = "utf-8": stm.Open
+        stm.LoadFromFile filePath
+        txt = stm.ReadText
+        stm.Close
+    Else
+        txt = header
+    End If
+    If Len(txt) = 0 Then txt = header
+    firstLine = txt
+    If InStr(1, txt, vbCrLf) > 0 Then firstLine = Left$(txt, InStr(1, txt, vbCrLf) - 1)
+    If InStr(1, firstLine, ";", vbBinaryCompare) = 0 And _
+       InStr(1, firstLine, ",", vbBinaryCompare) > 0 Then
+        txt = ConvertirCsvPointVirgule(txt)
+        firstLine = Left$(txt, InStr(1, txt & vbCrLf, vbCrLf) - 1)
+    End If
+    If InStr(1, firstLine, ";Action;", vbTextCompare) = 0 Then
+        Err.Raise vbObjectError + 2123, "Monabanq", _
+            "Le CSV existant utilise l'ancien format. Archivez-le avant le premier enregistrement avec le nouveau champ Action : " & filePath
+    End If
+    If Right$(txt, 1) <> vbLf Then txt = txt & vbCrLf
+    txt = txt & CsvField(wt.Cells(r, 2).Value) & ";" & CsvField(wt.Cells(r, 3).Value) & ";" & _
+        CsvField(Format$(CDate(wt.Cells(r, 4).Value), "yyyy-mm-dd hh:nn:ss")) & ";" & _
+        CsvField(wt.Cells(r, 5).Value) & ";" & CsvField(wt.Cells(r, 6).Value) & ";" & _
+        CsvField(wt.Cells(r, 7).Value) & ";" & CsvField(wt.Cells(r, 8).Value) & vbCrLf
+    Set stm = CreateObject("ADODB.Stream")
+    stm.Type = 2: stm.Charset = "utf-8": stm.Open
+    stm.WriteText txt
+    stm.SaveToFile filePath, 2
+    stm.Close
+End Sub
+
+Private Function CsvField(ByVal value As Variant) As String
+    CsvField = """" & Replace(CStr(value), """", """""") & """"
+End Function
+
+Private Function ConvertirCsvPointVirgule(ByVal source As String) As String
+    Dim i As Long, ch As String, insideQuotes As Boolean, result As String
+    i = 1
+    Do While i <= Len(source)
+        ch = Mid$(source, i, 1)
+        If ch = """" Then
+            result = result & ch
+            If insideQuotes And i < Len(source) And Mid$(source, i + 1, 1) = """" Then
+                result = result & """"
+                i = i + 1
+            Else
+                insideQuotes = Not insideQuotes
+            End If
+        ElseIf ch = "," And Not insideQuotes Then
+            result = result & ";"
+        Else
+            result = result & ch
+        End If
+        i = i + 1
+    Loop
+    ConvertirCsvPointVirgule = result
+End Function
+
+Private Sub CreerDossier(ByVal folderPath As String)
+    Dim fso As Object, parent As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FolderExists(folderPath) Then Exit Sub
+    parent = fso.GetParentFolderName(folderPath)
+    If Len(parent) > 0 And Not fso.FolderExists(parent) Then CreerDossier parent
+    If Not fso.FolderExists(folderPath) Then fso.CreateFolder folderPath
+End Sub
+
+Private Function NomFichier(ByVal value As String) As String
+    Dim chars As Variant, i As Long
+    chars = Array("\", "/", ":", "*", "?", """", "<", ">", "|")
+    NomFichier = Trim$(value)
+    For i = LBound(chars) To UBound(chars)
+        NomFichier = Replace(NomFichier, CStr(chars(i)), "_")
+    Next i
+    If NomFichier = "" Then NomFichier = "agent"
+End Function
